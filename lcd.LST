@@ -1,0 +1,517 @@
+MACRO ASSEMBLER LCD                                         04/23/26 22:51:39 PAGE     1
+
+
+DOS MACRO ASSEMBLER MA51 V06.06.10.125
+OBJECT MODULE PLACED IN lcd.OBJ
+ASSEMBLER INVOKED BY: DEBUG EP QUIET PIN(C:\SILABS\MCU\INC;C:\PROGRAM FILES\RAISONANCE\RIDE\INC;C:\PROGRAM FILES\RAISONANCE\RIDE\INC\51) 
+
+LOC     OBJ           LINE    SOURCE
+                         1     PUBLIC INIT_LCD, REFRESH_SCREEN, BLANK_SCREEN, SCREEN, FONT5X8
+                         2     
+                         3     ?PR?LCD SEGMENT CODE
+------                   4     RSEG ?PR?LCD
+                         5     
+                         6     $INCLUDE (C8051F020.INC)
+                       241     
+  8000                 242     LCD_CMD   EQU 08000H    ; command register address
+  8001                 243     LCD_DAT   EQU 08001H    ; data register address
+  0010                 244     LCD_RESET EQU 10H       ; P4.4 reset
+                       245     
+                       246     ;
+                       247     ; subroutines wcom and w_com_a
+                       248     ;   Writes a byte to the LCD command register after checking the busy flag first
+                       249     ;   Assumes the external memory inter/./
+                       250     ;face is configured for split mode with bank
+                       251     ;   select.
+                       252     ; inputs:
+                       253     ;   wcom:   r0  = byte to write to command register
+                       254     ;   wcom_a: acc = byte to write to command register
+                       255     ; outputs: none
+                       256     ; destroys:
+                       257     ;   wcom:   EMI0CN, r1
+                       258     ;   wcom_a: EMI0CN, r0, r1
+                       259     ;
+                       260     WCOM_A: 
+0000    F8             261     MOV R0,A ; save acc in R0 while we check BUSY
+                       262     WCOM: 
+0001    75AF80         263     MOV EMI0CN , # HIGH 32768 
+0004    7900           264     MOV R1 , # LOW 32768 
+                       265     WCOM1: 
+0006    E3             266     MOVX A,@R1 ; get status register
+0007    20E7FC         267     JB ACC.7,WCOM1 ; wait for not BUSY
+000A    E8             268     MOV A,R0 ; get the actual data to write
+000B    F3             269     MOVX @R1,A ; write the command
+000C    22             270     RET
+                       271     
+                       272     ;
+                       273     ; subroutines wdat and w_dat_a and w_datc
+                       274     ;   Writes a byte to the LCD data register after checking the busy flag first
+                       275     ;   Assumes the external memory interface is configured for split mode with bank
+                       276     ;   select.
+                       277     ; inputs:
+                       278     ;   wdat:   r0  = byte to write to data register
+                       279     ;   wdat_a: acc = byte to write to data register
+                       280     ;   wdat_c: acc = dptr-relative index (dptr[acc]) of byte to write to data register
+                       281     ; outputs: none
+                       282     ; destroys:
+                       283     ;   wdat:   EMI0CN, r1
+                       284     ;   wdat_a: EMI0CN, r0, r1
+                       285     ;   wdat_c: EMI0CN, r0, r1
+                       286     ;
+                       287     WDAT_C: 
+000D    93             288     MOVC A,@A+DPTR ; lookup byte to write (handy for fonts)
+                       289     WDAT_A: 
+000E    F8             290     MOV R0,A ; save it in R0 while we check BUSY
+                       291     WDAT: 
+000F    75AF80         292     MOV EMI0CN , # HIGH 32768 
+0012    7900           293     MOV R1 , # LOW 32768 
+                       294     WDAT1: 
+0014    E3             295     MOVX A,@R1 ; get status register
+0015    20E7FC         296     JB ACC.7,WDAT1 ; wait for not BUSY
+0018    09             297     INC R1 ; point to data register
+0019    E8             298     MOV A,R0 ; actual data to write
+001A    F3             299     MOVX @R1,A ; write the data
+001B    22             300     RET
+                       301     
+                       302     ;
+                       303     ; Initialize controller for S64128N LCD module
+                       304     ;   inputs: none
+                       305     ;   outputs: none
+                       306     ;   destroys: r0, r2, r3, dptr
+                       307     ;
+                       308     INIT_LCD: 
+001C    7584EF         309     MOV P4 , # NOT 16 
+001F    75A338         310     MOV EMI0CF,#038H     ; P4-7, non-muxed, split bank
+0022    75A10C         311     MOV EMI0TC,#00CH     ; pulse width 4 sysclock cycles
+0025    75B5FF         312     MOV P74OUT,#0FFH     ; push-pull
+0028    438410         313     ORL P4 , # 16 
+                       314     
+002B    782F           315     MOV R0,#02FH ; Boost on, voltage Reg and follower on
+002D    120000   F     316     CALL WCOM
+0030    78A2           317     MOV R0,#0A2H ; 1/9 bias selected
+0032    120000   F     318     CALL WCOM
+0035    78A1           319     MOV R0,#0A1H ; reverse segment driver output seg131-seg0
+0037    120000   F     320     CALL WCOM
+003A    78C0           321     MOV R0,#0C0H ; common output mode com0 to com63
+003C    120000   F     322     CALL WCOM
+003F    7824           323     MOV R0,#024H ; Ra/Rb ratio
+0041    120000   F     324     CALL WCOM
+0044    7881           325     MOV R0,#081H ; electronic volume mode set
+0046    120000   F     326     CALL WCOM
+0049    7828           327     MOV R0,#028H ; contrast
+004B    120000   F     328     CALL WCOM
+004E    7840           329     MOV R0,#040H ; display line address = 0
+0050    120000   F     330     CALL WCOM
+0053    78A6           331     MOV R0,#0A6H ; normal video
+0055    120000   F     332     CALL WCOM
+0058    78AF           333     MOV R0,#0AFH ; display on
+005A    120000   F     334     CALL WCOM
+005D    120000   F     335     CALL BLANK_SCREEN ; fall through to refresh_screen
+                       336     
+                       337     ;
+                       338     ; subroutine refresh_screen
+                       339     ;   Copies 1k bytes of data from external address 0 to the LCD. Bytes 0-7F go
+                       340     ;   into page 0, bytes 80-FF go to page 1 etc.
+                       341     ; inputs: none
+                       342     ; outputs: none
+                       343     ; destroys: r0, r2, r3, dptr, EMI0CN
+                       344     ;
+                       345     REFRESH_SCREEN: 
+0060    900000         346         MOV DPTR,#SCREEN
+0063    7AB0           347         MOV R2,#0B0H              ; page 0
+                       348     PAGE_LOOP: 
+0065    EA             349         MOV A,R2
+0066    120000   F     350         CALL WCOM_A               ; set page
+                       351     
+0069    7404           352         MOV A,#04H
+006B    120000   F     353         CALL WCOM_A               ; lower column nibble
+006E    7410           354         MOV A,#10H
+0070    120000   F     355         CALL WCOM_A               ; upper column nibble
+                       356     
+0073    7B80           357         MOV R3,#128
+                       358     BYTE_LOOP: 
+0075    E0             359         MOVX A,@DPTR
+0076    120000   F     360         CALL WDAT_A
+0079    A3             361         INC DPTR
+007A    DBF9           362         DJNZ R3,BYTE_LOOP
+                       363     
+007C    0A             364         INC R2
+007D    BAB8E5         365         CJNE R2,#0B8H,PAGE_LOOP
+0080    22             366         RET
+                       367     
+                       368     
+                       369     BLANK_SCREEN: 
+0081    900000         370         MOV DPTR,#SCREEN
+0084    E4             371         CLR A
+                       372     BLANK_LOOP: 
+0085    F0             373         MOVX @DPTR,A
+0086    A3             374         INC DPTR
+0087    8583F0         375         MOV B,DPH
+008A    30F2F8         376         JNB B.2,BLANK_LOOP
+008D    22             377         RET
+                       378     
+                       379     FONT5X8: 
+008E    00000000       380       DB  000H, 000H, 000H, 000H, 000H ;  
+0092    00
+0093    00065F06       381       DB  000H, 006H, 05FH, 006H, 000H ; !
+0097    00
+0098    07030007       382       DB  007H, 003H, 000H, 007H, 003H ; "
+009C    03
+009D    247E247E       383       DB  024H, 07EH, 024H, 07EH, 024H ; #
+00A1    24
+00A2    242B6A12       384       DB  024H, 02BH, 06AH, 012H, 000H ; $
+00A6    00
+00A7    63130864       385       DB  063H, 013H, 008H, 064H, 063H ; %
+00AB    63
+00AC    36495620       386       DB  036H, 049H, 056H, 020H, 050H ; &
+00B0    50
+00B1    00070300       387       DB  000H, 007H, 003H, 000H, 000H ; '
+00B5    00
+00B6    003E4100       388       DB  000H, 03EH, 041H, 000H, 000H ; (
+00BA    00
+00BB    00413E00       389       DB  000H, 041H, 03EH, 000H, 000H ; )
+00BF    00
+00C0    083E1C3E       390       DB  008H, 03EH, 01CH, 03EH, 008H ; *
+00C4    08
+00C5    08083E08       391       DB  008H, 008H, 03EH, 008H, 008H ; +
+00C9    08
+00CA    00E06000       392       DB  000H, 0E0H, 060H, 000H, 000H ; ,
+00CE    00
+00CF    08080808       393       DB  008H, 008H, 008H, 008H, 008H ; -
+00D3    08
+00D4    00606000       394       DB  000H, 060H, 060H, 000H, 000H ; .
+00D8    00
+00D9    20100804       395       DB  020H, 010H, 008H, 004H, 002H ; /
+00DD    02
+00DE    3E514945       396       DB  03EH, 051H, 049H, 045H, 03EH ; 0
+00E2    3E
+00E3    00427F40       397       DB  000H, 042H, 07FH, 040H, 000H ; 1
+00E7    00
+00E8    62514949       398       DB  062H, 051H, 049H, 049H, 046H ; 2
+00EC    46
+00ED    22494949       399       DB  022H, 049H, 049H, 049H, 036H ; 3
+00F1    36
+00F2    1814127F       400       DB  018H, 014H, 012H, 07FH, 010H ; 4
+00F6    10
+00F7    2F494949       401       DB  02FH, 049H, 049H, 049H, 031H ; 5
+00FB    31
+00FC    3C4A4949       402       DB  03CH, 04AH, 049H, 049H, 030H ; 6
+0100    30
+0101    01710905       403       DB  001H, 071H, 009H, 005H, 003H ; 7
+0105    03
+0106    36494949       404       DB  036H, 049H, 049H, 049H, 036H ; 8
+010A    36
+010B    06494929       405       DB  006H, 049H, 049H, 029H, 01EH ; 9
+010F    1E
+0110    006C6C00       406       DB  000H, 06CH, 06CH, 000H, 000H ; :
+0114    00
+0115    00EC6C00       407       DB  000H, 0ECH, 06CH, 000H, 000H ; ;
+0119    00
+011A    08142241       408       DB  008H, 014H, 022H, 041H, 000H ; <
+011E    00
+011F    24242424       409       DB  024H, 024H, 024H, 024H, 024H ; =
+0123    24
+0124    00412214       410       DB  000H, 041H, 022H, 014H, 008H ; >
+0128    08
+0129    02015909       411       DB  002H, 001H, 059H, 009H, 006H ; ?
+012D    06
+012E    3E415D55       412       DB  03EH, 041H, 05DH, 055H, 01EH ; @
+0132    1E
+0133    7E111111       413       DB  07EH, 011H, 011H, 011H, 07EH ; A
+0137    7E
+0138    7F494949       414       DB  07FH, 049H, 049H, 049H, 036H ; B
+013C    36
+013D    3E414141       415       DB  03EH, 041H, 041H, 041H, 022H ; C
+0141    22
+0142    7F414141       416       DB  07FH, 041H, 041H, 041H, 03EH ; D
+0146    3E
+0147    7F494949       417       DB  07FH, 049H, 049H, 049H, 041H ; E
+014B    41
+014C    7F090909       418       DB  07FH, 009H, 009H, 009H, 001H ; F
+0150    01
+0151    3E414949       419       DB  03EH, 041H, 049H, 049H, 07AH ; G
+0155    7A
+0156    7F080808       420       DB  07FH, 008H, 008H, 008H, 07FH ; H
+015A    7F
+015B    00417F41       421       DB  000H, 041H, 07FH, 041H, 000H ; I
+015F    00
+0160    30404040       422       DB  030H, 040H, 040H, 040H, 03FH ; J
+0164    3F
+0165    7F081422       423       DB  07FH, 008H, 014H, 022H, 041H ; K
+0169    41
+016A    7F404040       424       DB  07FH, 040H, 040H, 040H, 040H ; L
+016E    40
+016F    7F020402       425       DB  07FH, 002H, 004H, 002H, 07FH ; M
+0173    7F
+0174    7F020408       426       DB  07FH, 002H, 004H, 008H, 07FH ; N
+0178    7F
+0179    3E414141       427       DB  03EH, 041H, 041H, 041H, 03EH ; O
+017D    3E
+017E    7F090909       428       DB  07FH, 009H, 009H, 009H, 006H ; P
+0182    06
+0183    3E415121       429       DB  03EH, 041H, 051H, 021H, 05EH ; Q
+0187    5E
+0188    7F090919       430       DB  07FH, 009H, 009H, 019H, 066H ; R
+018C    66
+018D    26494949       431       DB  026H, 049H, 049H, 049H, 032H ; S
+0191    32
+0192    01017F01       432       DB  001H, 001H, 07FH, 001H, 001H ; T
+0196    01
+0197    3F404040       433       DB  03FH, 040H, 040H, 040H, 03FH ; U
+019B    3F
+019C    1F204020       434       DB  01FH, 020H, 040H, 020H, 01FH ; V
+01A0    1F
+01A1    3F403C40       435       DB  03FH, 040H, 03CH, 040H, 03FH ; W
+01A5    3F
+01A6    63140814       436       DB  063H, 014H, 008H, 014H, 063H ; X
+01AA    63
+01AB    07087008       437       DB  007H, 008H, 070H, 008H, 007H ; Y
+01AF    07
+01B0    71494543       438       DB  071H, 049H, 045H, 043H, 000H ; Z
+01B4    00
+                       439     
+                       440     
+------                 441     XSEG
+0000                   442     SCREEN:  DS 1024
+                       443     
+                       444     END
+MACRO ASSEMBLER LCD                                         04/23/26 22:51:39 PAGE     0
+
+
+SYMBOL TABLE LISTING
+------ ----- -------
+
+
+N A M E             T Y P E  V A L U E   ATTRIBUTES
+
+AD0INT . . . . . .  B ADDR   00E8H.5 A 
+CCF4 . . . . . . .  B ADDR   00D8H.4 A 
+WDTCN. . . . . . .  D ADDR   00FFH   A 
+DAC0H. . . . . . .  D ADDR   00D3H   A 
+RCAP2H . . . . . .  D ADDR   00CBH   A 
+ADC0LTH. . . . . .  D ADDR   00C7H   A 
+ADC0H. . . . . . .  D ADDR   00BFH   A 
+SBUF0. . . . . . .  D ADDR   0099H   A 
+DPL. . . . . . . .  D ADDR   0082H   A 
+P0 . . . . . . . .  D ADDR   0080H   A 
+SCREEN . . . . . .  X ADDR   0000H   A 
+BLANK_LOOP . . . .  C ADDR   0085H   R  SEG=?PR?LCD
+WDAT1. . . . . . .  C ADDR   0014H   R  SEG=?PR?LCD
+SMBFTE . . . . . .  B ADDR   00C0H.1 A 
+SBUF1. . . . . . .  D ADDR   00F2H   A 
+RSTSRC . . . . . .  D ADDR   00EFH   A 
+DAC1H. . . . . . .  D ADDR   00D6H   A 
+ADC0CF . . . . . .  D ADDR   00BCH   A 
+P1 . . . . . . . .  D ADDR   0090H   A 
+EXEN2. . . . . . .  B ADDR   00C8H.3 A 
+AA . . . . . . . .  B ADDR   00C0H.2 A 
+B. . . . . . . . .  D ADDR   00F0H   A 
+RCAP4H . . . . . .  D ADDR   00E5H   A 
+FLACL. . . . . . .  D ADDR   00B7H   A 
+ADC1CF . . . . . .  D ADDR   00ABH   A 
+EMI0TC . . . . . .  D ADDR   00A1H   A 
+P2 . . . . . . . .  D ADDR   00A0H   A 
+CPRL2. . . . . . .  B ADDR   00C8H.0 A 
+PS . . . . . . . .  B ADDR   00B8H.4 A 
+SMB0CN . . . . . .  D ADDR   00C0H   A 
+P3 . . . . . . . .  D ADDR   00B0H   A 
+SCON0. . . . . . .  D ADDR   0098H   A 
+SP . . . . . . . .  D ADDR   0081H   A 
+AC . . . . . . . .  B ADDR   00D0H.6 A 
+SCON1. . . . . . .  D ADDR   00F1H   A 
+EIE1 . . . . . . .  D ADDR   00E6H   A 
+DAC0L. . . . . . .  D ADDR   00D2H   A 
+RCAP2L . . . . . .  D ADDR   00CAH   A 
+ADC0LTL. . . . . .  D ADDR   00C6H   A 
+ADC0L. . . . . . .  D ADDR   00BEH   A 
+P4 . . . . . . . .  D ADDR   0084H   A 
+OV . . . . . . . .  B ADDR   00D0H.2 A 
+REN. . . . . . . .  B ADDR   0098H.4 A 
+EIE2 . . . . . . .  D ADDR   00E7H   A 
+DAC1L. . . . . . .  D ADDR   00D5H   A 
+P5 . . . . . . . .  D ADDR   0085H   A 
+LCD_CMD. . . . . .  N NUMB   8000h            
+MODF . . . . . . .  B ADDR   00F8H.5 A 
+EA . . . . . . . .  B ADDR   00A8H.7 A 
+RCAP4L . . . . . .  D ADDR   00E4H   A 
+T2CON. . . . . . .  D ADDR   00C8H   A 
+PSCTL. . . . . . .  D ADDR   008FH   A 
+P6 . . . . . . . .  D ADDR   0086H   A 
+INIT_LCD . . . . .  C ADDR   001CH   R  SEG=?PR?LCD
+WCOM1. . . . . . .  C ADDR   0006H   R  SEG=?PR?LCD
+MSTEN. . . . . . .  B ADDR   00F8H.1 A 
+ACC. . . . . . . .  D ADDR   00E0H   A 
+SMB0CR . . . . . .  D ADDR   00CFH   A 
+P7 . . . . . . . .  D ADDR   0096H   A 
+BLANK_SCREEN . . .  C ADDR   0081H   R  SEG=?PR?LCD
+AD0EN. . . . . . .  B ADDR   00E8H.7 A 
+STA. . . . . . . .  B ADDR   00C0H.5 A 
+T4CON. . . . . . .  D ADDR   00C9H   A 
+CPT0CN . . . . . .  D ADDR   009EH   A 
+CF . . . . . . . .  B ADDR   00D8H.7 A 
+CT2. . . . . . . .  B ADDR   00C8H.1 A 
+ET0. . . . . . . .  B ADDR   00A8H.1 A 
+ADC0CN . . . . . .  D ADDR   00E8H   A 
+DAC0CN . . . . . .  D ADDR   00D4H   A 
+SMB0ADR. . . . . .  D ADDR   00C3H   A 
+P1MDIN . . . . . .  D ADDR   00BDH   A 
+P0MDOUT. . . . . .  D ADDR   00A4H   A 
+CPT1CN . . . . . .  D ADDR   009FH   A 
+SMBTOE . . . . . .  B ADDR   00C0H.0 A 
+ET1. . . . . . . .  B ADDR   00A8H.3 A 
+TF0. . . . . . . .  B ADDR   0088H.5 A 
+DAC1CN . . . . . .  D ADDR   00D7H   A 
+ADC1CN . . . . . .  D ADDR   00AAH   A 
+P1MDOUT. . . . . .  D ADDR   00A5H   A 
+LCD_DAT. . . . . .  N NUMB   8001h            
+ET2. . . . . . . .  B ADDR   00A8H.5 A 
+TF1. . . . . . . .  B ADDR   0088H.7 A 
+SMB0DAT. . . . . .  D ADDR   00C2H   A 
+P2MDOUT. . . . . .  D ADDR   00A6H   A 
+TF2. . . . . . . .  B ADDR   00C8H.7 A 
+RCLK . . . . . . .  B ADDR   00C8H.5 A 
+RB8. . . . . . . .  B ADDR   0098H.2 A 
+PCA0H. . . . . . .  D ADDR   00F9H   A 
+P3MDOUT. . . . . .  D ADDR   00A7H   A 
+SPI0CFG. . . . . .  D ADDR   009AH   A 
+TMR3RLH. . . . . .  D ADDR   0093H   A 
+TH0. . . . . . . .  D ADDR   008CH   A 
+BYTE_LOOP. . . . .  C ADDR   0075H   R  SEG=?PR?LCD
+EX0. . . . . . . .  B ADDR   00A8H.0 A 
+IT0. . . . . . . .  B ADDR   0088H.0 A 
+SPI0CN . . . . . .  D ADDR   00F8H   A 
+TH1. . . . . . . .  D ADDR   008DH   A 
+TCLK . . . . . . .  B ADDR   00C8H.4 A 
+EX1. . . . . . . .  B ADDR   00A8H.2 A 
+TB8. . . . . . . .  B ADDR   0098H.3 A 
+IT1. . . . . . . .  B ADDR   0088H.2 A 
+TH2. . . . . . . .  D ADDR   00CDH   A 
+OSCXCN . . . . . .  D ADDR   00B1H   A 
+IE . . . . . . . .  D ADDR   00A8H   A 
+TMR3H. . . . . . .  D ADDR   0095H   A 
+CKCON. . . . . . .  D ADDR   008EH   A 
+REFRESH_SCREEN . .  C ADDR   0060H   R  SEG=?PR?LCD
+RXOVRN . . . . . .  B ADDR   00F8H.4 A 
+PCA0CPH0 . . . . .  D ADDR   00FAH   A 
+EIP1 . . . . . . .  D ADDR   00F6H   A 
+WDAT . . . . . . .  C ADDR   000FH   R  SEG=?PR?LCD
+WDAT_A . . . . . .  C ADDR   000EH   R  SEG=?PR?LCD
+P. . . . . . . . .  B ADDR   00D0H.0 A 
+SM0. . . . . . . .  B ADDR   0098H.7 A 
+PCA0CPH1 . . . . .  D ADDR   00FBH   A 
+EIP2 . . . . . . .  D ADDR   00F7H   A 
+TH4. . . . . . . .  D ADDR   00F5H   A 
+PCA0L. . . . . . .  D ADDR   00E9H   A 
+TMR3RLL. . . . . .  D ADDR   0092H   A 
+TL0. . . . . . . .  D ADDR   008AH   A 
+PCON . . . . . . .  D ADDR   0087H   A 
+SM1. . . . . . . .  B ADDR   0098H.6 A 
+PCA0CPH2 . . . . .  D ADDR   00FCH   A 
+TL1. . . . . . . .  D ADDR   008BH   A 
+WDAT_C . . . . . .  C ADDR   000DH   R  SEG=?PR?LCD
+SPIF . . . . . . .  B ADDR   00F8H.7 A 
+AD0LJST. . . . . .  B ADDR   00E8H.0 A 
+SM2. . . . . . . .  B ADDR   0098H.5 A 
+PCA0CPH3 . . . . .  D ADDR   00FDH   A 
+TL2. . . . . . . .  D ADDR   00CCH   A 
+P3IF . . . . . . .  D ADDR   00ADH   A 
+TMR3L. . . . . . .  D ADDR   0094H   A 
+PCA0CPH4 . . . . .  D ADDR   00FEH   A 
+PCA0CPL0 . . . . .  D ADDR   00EAH   A 
+P74OUT . . . . . .  D ADDR   00B5H   A 
+?PR?LCD. . . . . .  C SEG    01B5H      REL=UNIT   
+PT0. . . . . . . .  B ADDR   00B8H.1 A 
+TL4. . . . . . . .  D ADDR   00F4H   A 
+PCA0CPL1 . . . . .  D ADDR   00EBH   A 
+PCA0CPM0 . . . . .  D ADDR   00DAH   A 
+FLSCL. . . . . . .  D ADDR   00B6H   A 
+EMI0CF . . . . . .  D ADDR   00A3H   A 
+TMOD . . . . . . .  D ADDR   0089H   A 
+TCON . . . . . . .  D ADDR   0088H   A 
+LCD_RESET. . . . .  N NUMB   0010h            
+WCOL . . . . . . .  B ADDR   00F8H.6 A 
+CR . . . . . . . .  B ADDR   00D8H.6 A 
+RS0. . . . . . . .  B ADDR   00D0H.3 A 
+EXF2 . . . . . . .  B ADDR   00C8H.6 A 
+ENSMB. . . . . . .  B ADDR   00C0H.6 A 
+PT1. . . . . . . .  B ADDR   00B8H.3 A 
+PCA0CPL2 . . . . .  D ADDR   00ECH   A 
+PCA0CPM1 . . . . .  D ADDR   00DBH   A 
+PCA0MD . . . . . .  D ADDR   00D9H   A 
+PCA0CN . . . . . .  D ADDR   00D8H   A 
+AMX0SL . . . . . .  D ADDR   00BBH   A 
+SPI0DAT. . . . . .  D ADDR   009BH   A 
+PAGE_LOOP. . . . .  C ADDR   0065H   R  SEG=?PR?LCD
+WCOM . . . . . . .  C ADDR   0001H   R  SEG=?PR?LCD
+WCOM_A . . . . . .  C ADDR   0000H   R  SEG=?PR?LCD
+AD0TM. . . . . . .  B ADDR   00E8H.6 A 
+F0 . . . . . . . .  B ADDR   00D0H.5 A 
+RS1. . . . . . . .  B ADDR   00D0H.4 A 
+STO. . . . . . . .  B ADDR   00C0H.4 A 
+PT2. . . . . . . .  B ADDR   00B8H.5 A 
+TR0. . . . . . . .  B ADDR   0088H.4 A 
+PCA0CPL3 . . . . .  D ADDR   00EDH   A 
+PCA0CPM2 . . . . .  D ADDR   00DCH   A 
+AMX1SL . . . . . .  D ADDR   00ACH   A 
+AD0WINT. . . . . .  B ADDR   00E8H.1 A 
+F1 . . . . . . . .  B ADDR   00D0H.1 A 
+TR1. . . . . . . .  B ADDR   0088H.6 A 
+PCA0CPL4 . . . . .  D ADDR   00EEH   A 
+PCA0CPM3 . . . . .  D ADDR   00DDH   A 
+TMR3CN . . . . . .  D ADDR   0091H   A 
+AD0BUSY. . . . . .  B ADDR   00E8H.4 A 
+TR2. . . . . . . .  B ADDR   00C8H.2 A 
+PX0. . . . . . . .  B ADDR   00B8H.0 A 
+ES . . . . . . . .  B ADDR   00A8H.4 A 
+PCA0CPM4 . . . . .  D ADDR   00DEH   A 
+SLVSEL . . . . . .  B ADDR   00F8H.2 A 
+AD0STM0. . . . . .  B ADDR   00E8H.2 A 
+PX1. . . . . . . .  B ADDR   00B8H.2 A 
+IP . . . . . . . .  D ADDR   00B8H   A 
+ADC1 . . . . . . .  D ADDR   009CH   A 
+TXBSY. . . . . . .  B ADDR   00F8H.3 A 
+AD0STM1. . . . . .  B ADDR   00E8H.3 A 
+PSW. . . . . . . .  D ADDR   00D0H   A 
+SMB0STA. . . . . .  D ADDR   00C1H   A 
+RI . . . . . . . .  B ADDR   0098H.0 A 
+ADC0GTH. . . . . .  D ADDR   00C5H   A 
+SADEN0 . . . . . .  D ADDR   00B9H   A 
+CCF0 . . . . . . .  B ADDR   00D8H.0 A 
+CY . . . . . . . .  B ADDR   00D0H.7 A 
+SI . . . . . . . .  B ADDR   00C0H.3 A 
+XBR0 . . . . . . .  D ADDR   00E1H   A 
+EMI0CN . . . . . .  D ADDR   00AFH   A 
+SADEN1 . . . . . .  D ADDR   00AEH   A 
+SPI0CKR. . . . . .  D ADDR   009DH   A 
+DPH. . . . . . . .  D ADDR   0083H   A 
+FONT5X8. . . . . .  C ADDR   008EH   R  SEG=?PR?LCD
+CCF1 . . . . . . .  B ADDR   00D8H.1 A 
+TI . . . . . . . .  B ADDR   0098H.1 A 
+XBR1 . . . . . . .  D ADDR   00E2H   A 
+CCF2 . . . . . . .  B ADDR   00D8H.2 A 
+IE0. . . . . . . .  B ADDR   0088H.1 A 
+XBR2 . . . . . . .  D ADDR   00E3H   A 
+REF0CN . . . . . .  D ADDR   00D1H   A 
+SADDR0 . . . . . .  D ADDR   00A9H   A 
+SPIEN. . . . . . .  B ADDR   00F8H.0 A 
+CCF3 . . . . . . .  B ADDR   00D8H.3 A 
+IE1. . . . . . . .  B ADDR   0088H.3 A 
+SADDR1 . . . . . .  D ADDR   00F3H   A 
+ADC0GTL. . . . . .  D ADDR   00C4H   A 
+AMX0CF . . . . . .  D ADDR   00BAH   A 
+OSCICN . . . . . .  D ADDR   00B2H   A 
+
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    437    ----
+   XDATA SIZE       =   1024    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+REGISTER BANK(S) USED : 0 
+
+ASSEMBLY COMPLETE.   0 WARNING(S)   0 ERROR(S)

@@ -1,0 +1,2 @@
+"C:\Users\shreeyamaharjan\Documents\ECE3710\Tank_Embedded_Project\Tank_project\Tank.obj",
+"C:\Users\shreeyamaharjan\Documents\ECE3710\Tank_Embedded_Project\Tank_project\lcd.obj"  TO( "C:\Users\shreeyamaharjan\Documents\ECE3710\Tank_Embedded_Project\Tank_project\Tank" ) RS(256) PL(68) PW(78) LIBPATH(C:\Program Files\Raisonance\Ride\lib) 
