@@ -12,7 +12,7 @@ Features
 - Random respawn positions after each hit
 - LCD-based graphics rendering using external memory
 
-Hardware Used
+Hardware Used:
 - C8051F020
 - LCD display (memory-mapped)
 - Potentiometers (for direction control)
@@ -22,11 +22,12 @@ Hardware Used
 
 The system uses interrupts and timers to handle real-time movement and game updates. The tank position is updated based on ADC input, while the display buffer is continuously refreshed to render the game graphics.
 
-Controls
-Movement: Potentiometer (8 directions)
-Fire: Push button
-Speed Control: DIP switches
-Future Improvements
--Sound effects integration
--Smarter enemy AI
--Score tracking system
+Controls:
+Movement: Potentiometer (8 directions),
+Fire: Push button, 
+Speed Control: DIP switches,
+
+Future Improvements:
+-Sound effects integration,
+-Smarter enemy AI,
+-Score tracking system, 
