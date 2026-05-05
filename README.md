@@ -11,6 +11,7 @@ Features
 - Adjustable tank speed using DIP switches
 - Random respawn positions after each hit
 - LCD-based graphics rendering using external memory
+
 Hardware Used
 - C8051F020
 - LCD display (memory-mapped)
